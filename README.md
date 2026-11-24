@@ -10,22 +10,21 @@ Sentinel 是一个只驻留在 macOS 菜单栏的原生输入保护工具。它�
 - 6 位数字解锁密码，使用 PBKDF2-SHA256 加盐摘要保存在 macOS 钥匙串
 - 默认 `⌘⌥L` 呼出保护层，可在设置中录制新快捷键
 - 默认 `⌘⌥⌃Q` 在保护层内强制退出 Sentinel
-- 全屏 Liquid Glass 保护层，背景由系统合成器实时渲染，不截图、不录制屏幕
-- 鼠标首次移动、滚动或点按后提高玻璃模糊与暗化强度，并显示密码界面
+- 全屏保护层默认完全透明，直接显示桌面与实时运行的任务，不截图、不录制屏幕
+- 移动鼠标、滚动、点按或按键后，由 macOS 实时增加背景模糊并显示六位密码圆点
 - 保护期间拦截键盘、修饰键、鼠标按键、拖动、滚轮和触控板指针事件
-- 密码界面只接受主键盘或数字小键盘的 `0` 到 `9`，不响应鼠标点击
+- 解锁界面只显示六个圆点，不显示数字键盘；每位密码输入后对应圆点变为实心
+- 10 秒无输入后自动清除已输入内容，重新隐藏圆点并恢复完全透明
 - 可选的 Touch ID 解锁；系统支持且已录入指纹时，可在密码界面出现后自动请求一次
-- 多显示器时每一块屏幕都会显示保护层，只有主显示器显示密码键盘
+- 多显示器时每一块屏幕都会显示保护层，只有主显示器显示密码圆点
 - 支持登录时自动启动，并在解锁后恢复此前的前台应用
 
 ## 系统要求
 
 - Apple Silicon Mac（arm64）
-- macOS 14 或更高版本
-- macOS 26 或更高版本会使用系统原生 `NSGlassEffectView` 材质
-- macOS 14 至 15 会使用 `NSVisualEffectView` 实时材质回退
+- macOS 27 或更高版本
 
-发布包在最新 macOS SDK 上编译，实际运行最低版本由 `Info.plist` 与 SwiftPM 部署目标决定。
+应用使用 macOS 27 SDK 构建，部署目标同为 macOS 27，以启用当前系统的原生窗口外观和 Liquid Glass 控件。
 
 ## 安装
 
@@ -48,9 +47,10 @@ Sentinel 不会在缺少辅助功能权限时显示保护层。此设计避免�
 ## 使用
 
 - 按 `⌘⌥L` 或点击菜单栏中的 Sentinel，再选择“立即锁定”。
-- 所有显示器会立即显示实时 Liquid Glass 保护层。
-- 移动鼠标、点击或滚动后，主显示器会显示 6 个密码圆点和密码键盘。
-- 直接从键盘输入 6 位数字。密码正确后保护层关闭，并恢复输入能力。
+- 所有显示器会立即覆盖完全透明的保护层，各屏幕左上角显示一个黑色圆形锁头。
+- 移动鼠标、点击、滚动或按下任意键后，背景实时增加模糊，主显示器显示 6 个密码圆点。
+- 直接从键盘输入 6 位数字，圆点会逐位变为实心。密码正确后保护层关闭，并恢复输入能力。
+- 若 10 秒内没有新的输入，Sentinel 会清除已输入数字并恢复完全透明，但电脑仍保持锁定。
 - 如果启用了 Touch ID，系统会在密码界面出现后请求一次指纹验证。
 - 保护层内如遇紧急情况，按 `⌘⌥⌃Q` 强制退出 Sentinel。
 
@@ -79,7 +79,7 @@ swift build -c release --arch arm64
 
 ```bash
 chmod +x Scripts/package.sh
-SENTINEL_VERSION=1.0.0 BUILD_NUMBER=1 Scripts/package.sh
+SENTINEL_VERSION=1.1.0 BUILD_NUMBER=1 Scripts/package.sh
 ```
 
 打包脚本会：
@@ -97,8 +97,8 @@ SENTINEL_VERSION=1.0.0 BUILD_NUMBER=1 Scripts/package.sh
 `.github/workflows/release.yml` 监听以 `v` 开头的标签：
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 工作流会在 `macos-latest` 上构建 arm64 应用，生成 ZIP 和 DMG，并附加到对应的 GitHub Release。
@@ -132,7 +132,7 @@ Sentinel/
   App/         应用入口、生命周期与协调器
   Models/      设置、快捷键与解锁状态
   Services/    钥匙串、密码、Touch ID、登录项、热键与输入拦截
-  Views/       菜单栏、设置、全屏保护层与 Liquid Glass 材质
+  Views/       菜单栏、设置、全屏保护层与系统模糊背景
   Resources/   Info.plist
 Scripts/       图标生成与应用打包
 .github/       Release 工作流

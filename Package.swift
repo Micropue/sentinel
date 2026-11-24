@@ -1,11 +1,11 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.4
 
 import PackageDescription
 
 let package = Package(
     name: "Sentinel",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v27)
     ],
     products: [
         .executable(name: "Sentinel", targets: ["Sentinel"])
@@ -25,5 +25,5 @@ let package = Package(
             ]
         )
     ],
-    swiftLanguageVersions: [.v5]
+    swiftLanguageModes: [.v5]
 )

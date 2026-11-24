@@ -4,7 +4,6 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = AppCoordinator.shared
-    private var settingsWindowController: NSWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -41,24 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showSettings() {
-        if settingsWindowController == nil {
-            let hostingController = NSHostingController(
-                rootView: SettingsView(coordinator: coordinator)
-            )
-            let window = NSWindow(contentViewController: hostingController)
-            window.title = "Sentinel 设置"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 790, height: 760))
-            window.minSize = NSSize(width: 720, height: 620)
-            window.isReleasedWhenClosed = false
-            window.tabbingMode = .disallowed
-            window.center()
-            settingsWindowController = NSWindowController(window: window)
-        }
-
         coordinator.refreshPermissionsAndSettings()
-        settingsWindowController?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+
+        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        }
     }
 }

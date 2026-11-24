@@ -27,10 +27,15 @@ final class AppCoordinator: ObservableObject {
     private var lockViewModel: LockViewModel?
     private var verificationTask: Task<Void, Never>?
     private var biometricTask: Task<Void, Never>?
+    private var idleTask: Task<Void, Never>?
     private var biometricPromptToken = UUID()
     private var biometricAttempted = false
+    private var lastInputDate = Date.distantPast
+    private var lockStartedAt = Date.distantPast
     private var hotKeySuspensionDepth = 0
     private var didStart = false
+
+    private static let inputGracePeriod: TimeInterval = 0.45
 
     init(vault: PasswordVault = PasswordVault()) {
         let loadedSettings = SettingsPersistence.load()
@@ -101,20 +106,14 @@ final class AppCoordinator: ObservableObject {
         }
 
         let model = LockViewModel(
-            forceQuitHotKey: settings.forceQuitHotKey,
-            touchIDConfigured: settings.touchIDEnabled,
-            touchIDAvailable: biometric.availability.isAvailable
+            biometricUnlockAvailable: settings.touchIDEnabled
+                && biometric.availability.isAvailable
         )
         let inputLock = InputLockService(forceQuitHotKey: settings.forceQuitHotKey)
 
-        inputLock.onReveal = { [weak self] in
+        inputLock.onInput = { [weak self] digit in
             Task { @MainActor [weak self] in
-                self?.handleReveal()
-            }
-        }
-        inputLock.onDigit = { [weak self] digit in
-            Task { @MainActor [weak self] in
-                self?.handleDigit(digit)
+                self?.handleInput(digit)
             }
         }
         inputLock.onForceQuit = { [weak self] in
@@ -137,15 +136,17 @@ final class AppCoordinator: ObservableObject {
         inputLockService = inputLock
         verificationTask = nil
         biometricTask = nil
+        idleTask = nil
         biometricAttempted = false
         biometricPromptToken = UUID()
+        lastInputDate = .distantPast
+        lockStartedAt = Date()
         isLocked = true
 
         overlayController.show(viewModel: model)
     }
 
     func presentSettings() {
-        NSApp.activate(ignoringOtherApps: true)
         openSettingsHandler?()
     }
 
@@ -288,12 +289,39 @@ final class AppCoordinator: ObservableObject {
         hotKeyManager.stop()
     }
 
-    private func handleReveal() {
-        guard isLocked, let model = lockViewModel, !model.showsPasswordEntry else {
+    private func handleInput(_ digit: Character?) {
+        guard isLocked,
+              let model = lockViewModel,
+              Date().timeIntervalSince(lockStartedAt) >= Self.inputGracePeriod
+        else {
             return
         }
 
-        model.revealPasswordEntry()
+        let wasHidden = !model.showsPasswordEntry
+        model.registerUserActivity()
+        scheduleIdleReturn()
+
+        if wasHidden && digit == nil {
+            scheduleBiometricUnlock()
+        }
+
+        if model.isBiometricPrompting && digit != nil {
+            biometricPromptToken = UUID()
+            biometric.cancel()
+            model.cancelBiometricPrompt()
+        }
+
+        guard let digit else {
+            return
+        }
+
+        let isComplete = model.appendDigit(digit)
+        if isComplete {
+            beginPasswordVerification()
+        }
+    }
+
+    private func scheduleBiometricUnlock() {
         biometricTask?.cancel()
         biometricTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 620_000_000)
@@ -304,21 +332,41 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func handleDigit(_ digit: Character) {
-        guard isLocked, let model = lockViewModel else {
+    private func scheduleIdleReturn() {
+        lastInputDate = Date()
+        guard idleTask == nil else {
             return
         }
 
-        if model.isBiometricPrompting {
-            biometricPromptToken = UUID()
-            biometric.cancel()
-            model.cancelBiometricPrompt()
-        }
+        idleTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, let self else {
+                    return
+                }
+                guard self.isLocked else {
+                    return
+                }
+                guard Date().timeIntervalSince(self.lastInputDate) >= 10 else {
+                    continue
+                }
 
-        let isComplete = model.appendDigit(digit)
-        if isComplete {
-            beginPasswordVerification()
+                self.returnToHiddenLockState()
+                return
+            }
         }
+    }
+
+    private func returnToHiddenLockState() {
+        verificationTask?.cancel()
+        verificationTask = nil
+        biometricTask?.cancel()
+        biometricTask = nil
+        biometricPromptToken = UUID()
+        biometric.cancel()
+        biometricAttempted = false
+        lockViewModel?.returnToIdle()
+        idleTask = nil
     }
 
     private func beginPasswordVerification() {
@@ -399,8 +447,12 @@ final class AppCoordinator: ObservableObject {
         verificationTask = nil
         biometricTask?.cancel()
         biometricTask = nil
+        idleTask?.cancel()
+        idleTask = nil
         biometricPromptToken = UUID()
         biometric.cancel()
+        lastInputDate = .distantPast
+        lockStartedAt = .distantPast
 
         inputLockService?.stop()
         inputLockService = nil
@@ -412,7 +464,7 @@ final class AppCoordinator: ObservableObject {
         previousApplication = nil
         if restorePreviousApplication, let application, application != NSRunningApplication.current {
             DispatchQueue.main.async {
-                application.activate(options: [.activateIgnoringOtherApps])
+                application.activate()
             }
         }
     }

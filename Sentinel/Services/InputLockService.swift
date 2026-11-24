@@ -7,10 +7,11 @@ final class InputLockService {
     private let forceQuitHotKey: GlobalHotKey
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var hasRevealed = false
+    private var lastActivitySignal: TimeInterval = 0
 
-    var onReveal: (() -> Void)?
-    var onDigit: ((Character) -> Void)?
+    private static let activitySignalInterval: TimeInterval = 0.05
+
+    var onInput: ((Character?) -> Void)?
     var onForceQuit: (() -> Void)?
 
     init(forceQuitHotKey: GlobalHotKey) {
@@ -53,7 +54,7 @@ final class InputLockService {
 
         eventTap = tap
         runLoopSource = source
-        hasRevealed = false
+        lastActivitySignal = 0
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         return true
@@ -78,9 +79,6 @@ final class InputLockService {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
-            return Unmanaged.passUnretained(event)
-
-        case .flagsChanged:
             return nil
 
         case .keyDown:
@@ -92,37 +90,39 @@ final class InputLockService {
                 return nil
             }
 
-            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
-               let digit = GlobalHotKey.digit(from: event) {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onDigit?(digit)
-                }
-            }
-            return nil
-
-        case .mouseMoved,
-             .leftMouseDown,
-             .leftMouseUp,
-             .rightMouseDown,
-             .rightMouseUp,
-             .otherMouseDown,
-             .otherMouseUp,
-             .leftMouseDragged,
-             .rightMouseDragged,
-             .otherMouseDragged,
-             .scrollWheel,
-             .tabletPointer,
-             .tabletProximity:
-            if !hasRevealed {
-                hasRevealed = true
-                DispatchQueue.main.async { [weak self] in
-                    self?.onReveal?()
-                }
+            let digit = event.getIntegerValueField(.keyboardEventAutorepeat) == 0
+                ? GlobalHotKey.digit(from: event)
+                : nil
+            if let digit {
+                forwardDigit(digit)
+            } else {
+                forwardActivity()
             }
             return nil
 
         default:
+            forwardActivity()
             return nil
+        }
+    }
+
+    private func forwardActivity() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastActivitySignal >= Self.activitySignalInterval else {
+            return
+        }
+        lastActivitySignal = now
+        forwardInput(nil)
+    }
+
+    private func forwardDigit(_ digit: Character) {
+        lastActivitySignal = ProcessInfo.processInfo.systemUptime
+        forwardInput(digit)
+    }
+
+    private func forwardInput(_ digit: Character?) {
+        DispatchQueue.main.async { [weak self] in
+            self?.onInput?(digit)
         }
     }
 

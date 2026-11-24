@@ -44,8 +44,8 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("设置…") {
-            coordinator.presentSettings()
+        SettingsLink {
+            Label("设置…", systemImage: "gearshape")
         }
 
         Button("退出 Sentinel") {

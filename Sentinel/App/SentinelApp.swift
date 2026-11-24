@@ -14,5 +14,11 @@ struct SentinelApp: App {
                 .accessibilityLabel("Sentinel")
         }
         .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView(coordinator: coordinator)
+        }
+        .defaultSize(width: 600, height: 520)
+        .windowResizability(.contentSize)
     }
 }

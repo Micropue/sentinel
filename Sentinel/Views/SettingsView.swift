@@ -1,493 +1,621 @@
 import AppKit
 import SwiftUI
 
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case general
+    case unlock
+    case shortcuts
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "通用"
+        case .unlock: "解锁"
+        case .shortcuts: "快捷键"
+        case .about: "关于"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .unlock: "lock.fill"
+        case .shortcuts: "command"
+        case .about: "info.circle"
+        }
+    }
+}
+
+private enum PasswordField: Hashable {
+    case current
+    case new
+    case confirmation
+}
+
+@MainActor
+private final class SettingsDraft: ObservableObject {
+    @Published var selectedCategory: SettingsCategory = .general
+    @Published var currentPassword = ""
+    @Published var newPassword = ""
+    @Published var confirmation = ""
+    @Published var isSavingPassword = false
+    @Published var showsPasswordEditor = false
+    @Published var feedbackText: String?
+    @Published var feedbackIsError = false
+    @Published var hotKeyFeedback: String?
+    @Published var hotKeyRegistrationMessage: String?
+}
+
 struct SettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
 
+    @StateObject private var draft = SettingsDraft()
     @StateObject private var recorder = HotKeyRecorder()
-    @State private var currentPassword = ""
-    @State private var newPassword = ""
-    @State private var confirmation = ""
-    @State private var isSavingPassword = false
-    @State private var showsPasswordEditor = false
-    @State private var feedbackText: String?
-    @State private var feedbackIsError = false
-    @State private var hotKeyFeedback: String?
-    @State private var hotKeyRegistrationMessage: String?
+    @FocusState private var focusedPasswordField: PasswordField?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-
-                if !coordinator.hasPassword {
-                    setupBanner
-                }
-
-                permissionsCard
-                passwordCard
-                authenticationCard
-                shortcutsCard
-                startupCard
-                footer
+        TabView(selection: $draft.selectedCategory) {
+            Tab("通用", systemImage: SettingsCategory.general.symbol, value: .general) {
+                settingsForm { generalContent }
             }
-            .frame(maxWidth: 880, alignment: .leading)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 26)
+
+            Tab("解锁", systemImage: SettingsCategory.unlock.symbol, value: .unlock) {
+                settingsForm { unlockContent }
+            }
+
+            Tab("快捷键", systemImage: SettingsCategory.shortcuts.symbol, value: .shortcuts) {
+                settingsForm { shortcutsContent }
+            }
+
+            Tab("关于", systemImage: SettingsCategory.about.symbol, value: .about) {
+                settingsForm { aboutContent }
+            }
         }
-        .background(SettingsCanvas())
-        .frame(minWidth: 720, idealWidth: 790, minHeight: 620, idealHeight: 760)
+        .frame(
+            minWidth: 540,
+            idealWidth: 600,
+            maxWidth: 680,
+            minHeight: 440,
+            idealHeight: 520,
+            maxHeight: 620
+        )
+        .background(Color(nsColor: .windowBackgroundColor))
+        .toolbarBackground(
+            Color(nsColor: .windowBackgroundColor),
+            for: .windowToolbar
+        )
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .onAppear {
             coordinator.refreshPermissionsAndSettings()
             if !coordinator.hasPassword {
-                showsPasswordEditor = true
+                draft.selectedCategory = .unlock
+                draft.showsPasswordEditor = true
             }
         }
         .onDisappear {
             recorder.cancel()
         }
+        .onChange(of: draft.selectedCategory) {
+            recorder.cancel()
+        }
+        .onChange(of: draft.showsPasswordEditor) {
+            guard draft.showsPasswordEditor else {
+                focusedPasswordField = nil
+                return
+            }
+
+            DispatchQueue.main.async {
+                focusedPasswordField = coordinator.hasPassword ? .current : .new
+            }
+        }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.11, green: 0.43, blue: 0.73),
-                                Color(red: 0.33, green: 0.23, blue: 0.72)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.96))
-            }
-            .frame(width: 58, height: 58)
-            .shadow(color: Color.black.opacity(0.16), radius: 14, y: 7)
+    private func settingsForm<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Form {
+            content()
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("Sentinel")
-                        .font(.system(size: 27, weight: .bold, design: .rounded))
-                    Text("v\(appVersion)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
+    @ViewBuilder
+    private var generalContent: some View {
+        if !coordinator.hasPassword {
+            Section("开始使用") {
+                SettingsIconLabel(
+                    symbol: "key.fill",
+                    title: "先创建解锁密码",
+                    subtitle: "设置 6 位数字密码后，才能启用全屏输入保护。",
+                    tint: .orange
+                )
+
+                Button("前往解锁设置") {
+                    draft.selectedCategory = .unlock
+                    draft.showsPasswordEditor = true
                 }
-                Text("AI 任务运行时，把键盘和鼠标交给保护层。")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.glassProminent)
             }
-
-            Spacer(minLength: 12)
-
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(protectionColor)
-                    .frame(width: 7, height: 7)
-                Text(protectionStatus)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Color.primary.opacity(0.055), in: Capsule())
         }
-    }
 
-    private var setupBanner: some View {
-        HStack(alignment: .top, spacing: 13) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 34, height: 34)
-                .background(Color.accentColor.opacity(0.10), in: Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("先创建解锁密码")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("设置一组 6 位数字密码后，菜单栏中的“立即锁定”才会启用。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+        Section("系统权限") {
+            LabeledContent {
+                Label(
+                    coordinator.accessibilityTrusted ? "已授权" : "未授权",
+                    systemImage: coordinator.accessibilityTrusted
+                        ? "checkmark.circle.fill"
+                        : "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(
+                    coordinator.accessibilityTrusted ? Color.green : Color.orange
+                )
+            } label: {
+                SettingsIconLabel(
+                    symbol: "accessibility",
+                    title: "辅助功能",
+                    subtitle: "拦截全系统键盘、鼠标与触控板事件",
+                    tint: coordinator.accessibilityTrusted ? .green : .orange
+                )
             }
-            Spacer()
-        }
-        .padding(14)
-        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 13))
-        .overlay(
-            RoundedRectangle(cornerRadius: 13)
-                .strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 1)
-        )
-    }
 
-    private var permissionsCard: some View {
-        SettingsCard(
-            title: "系统权限",
-            subtitle: "保护层必须先拿到全系统输入拦截能力，才会出现。",
-            systemImage: "hand.raised.fill"
-        ) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: coordinator.accessibilityTrusted
-                      ? "checkmark.circle.fill"
-                      : "exclamationmark.triangle.fill")
-                    .font(.system(size: 19))
-                    .foregroundStyle(coordinator.accessibilityTrusted ? Color.green : Color.orange)
-                    .padding(.top, 1)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(coordinator.accessibilityTrusted ? "辅助功能权限已授权" : "辅助功能权限未授权")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(
-                        coordinator.accessibilityTrusted
-                            ? "Sentinel 已可拦截全系统的键盘、鼠标与触控板事件。"
-                            : "请允许 Sentinel 控制此电脑。没有该权限时，应用会拒绝显示保护层，避免产生可被绕过的假保护。"
-                    )
-                    .font(.system(size: 11))
+            if !coordinator.accessibilityTrusted {
+                Text("请允许 Sentinel 控制此电脑。没有该权限时，应用会拒绝显示保护层。")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                if !coordinator.accessibilityTrusted {
+                    Button("请求授权") {
+                        coordinator.requestAccessibilityPermission()
+                    }
+                    .buttonStyle(.glassProminent)
                 }
 
-                Spacer(minLength: 16)
-
-                HStack(spacing: 8) {
-                    if !coordinator.accessibilityTrusted {
-                        Button("请求授权") {
-                            coordinator.requestAccessibilityPermission()
-                        }
-                        .buttonStyle(.borderedProminent)
+                Button(coordinator.accessibilityTrusted ? "刷新状态" : "打开系统设置") {
+                    if coordinator.accessibilityTrusted {
+                        coordinator.refreshAccessibilityStatus()
+                    } else {
+                        coordinator.openAccessibilitySettings()
                     }
-
-                    Button(coordinator.accessibilityTrusted ? "刷新状态" : "系统设置") {
-                        if coordinator.accessibilityTrusted {
-                            coordinator.refreshAccessibilityStatus()
-                        } else {
-                            coordinator.openAccessibilitySettings()
-                        }
-                    }
-                    .buttonStyle(.bordered)
                 }
+                .buttonStyle(.glass)
+            }
+        }
+
+        Section("启动与后台") {
+            Toggle("登录时自动启动 Sentinel", isOn: launchAtLoginBinding)
+                .disabled(coordinator.launchAtLoginRequiresApproval)
+
+            if coordinator.launchAtLoginRequiresApproval {
+                Text("macOS 正在等待你在“登录项与扩展”中确认。")
+                    .foregroundStyle(.secondary)
+
+                Button("打开登录项设置") {
+                    coordinator.openLoginItemsSettings()
+                }
+                .buttonStyle(.glass)
             }
         }
     }
 
-    private var passwordCard: some View {
-        SettingsCard(
-            title: "解锁密码",
-            subtitle: "键盘只会接受 0–9，密码不会离开本机钥匙串。",
-            systemImage: "number.square.fill"
-        ) {
-            if coordinator.hasPassword && !showsPasswordEditor {
-                HStack(spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill")
+    @ViewBuilder
+    private var unlockContent: some View {
+        Section("解锁密码") {
+            if coordinator.hasPassword && !draft.showsPasswordEditor {
+                LabeledContent {
+                    Label("已设置", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(Color.green)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("已设置 6 位数字密码")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("PBKDF2-SHA256 加盐摘要，保存在 macOS 钥匙串")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("更改密码") {
-                        clearPasswordFeedback()
-                        showsPasswordEditor = true
-                    }
+                } label: {
+                    SettingsIconLabel(
+                        symbol: "number",
+                        title: "6 位数字密码",
+                        subtitle: "键盘输入 6 个数字后自动解锁",
+                        tint: .accentColor
+                    )
                 }
+
+                Text("密码以 PBKDF2-SHA256 加盐摘要形式保存在 macOS 钥匙串。")
+                    .foregroundStyle(.secondary)
+
+                if draft.feedbackText != nil {
+                    feedbackLabel
+                }
+
+                Button("更改密码") {
+                    clearPasswordFeedback()
+                    draft.showsPasswordEditor = true
+                }
+                .buttonStyle(.glass)
             } else {
-                VStack(alignment: .leading, spacing: 13) {
+                VStack(alignment: .leading, spacing: 14) {
                     if coordinator.hasPassword {
-                        CodeSecureField(
+                        passwordInput(
                             title: "当前密码",
-                            text: $currentPassword,
-                            isDisabled: isSavingPassword
+                            prompt: "输入当前 6 位密码",
+                            text: currentPasswordBinding,
+                            field: .current
                         )
                     }
 
-                    HStack(alignment: .top, spacing: 12) {
-                        CodeSecureField(
-                            title: coordinator.hasPassword ? "新密码" : "创建 6 位密码",
-                            text: $newPassword,
-                            isDisabled: isSavingPassword
-                        )
-                        CodeSecureField(
-                            title: "再次输入",
-                            text: $confirmation,
-                            isDisabled: isSavingPassword
-                        )
+                    passwordInput(
+                        title: coordinator.hasPassword ? "新密码" : "创建密码",
+                        prompt: "输入 6 位数字",
+                        text: newPasswordBinding,
+                        field: .new
+                    )
+
+                    passwordInput(
+                        title: "确认密码",
+                        prompt: "再次输入 6 位数字",
+                        text: confirmationBinding,
+                        field: .confirmation
+                    )
+
+                    if draft.feedbackText != nil {
+                        feedbackLabel
                     }
 
-                    if let feedbackText {
-                        Label(
-                            feedbackText,
-                            systemImage: feedbackIsError
-                                ? "exclamationmark.circle.fill"
-                                : "checkmark.circle.fill"
-                        )
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(feedbackIsError ? Color.red : Color.green)
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: 9) {
-                        Text("只能是 0–9，共 6 位。")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.tertiary)
+                    HStack {
+                        if coordinator.hasPassword {
+                            Button("取消", role: .cancel) {
+                                resetPasswordDraft()
+                                clearPasswordFeedback()
+                                draft.showsPasswordEditor = false
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(draft.isSavingPassword)
+                        }
 
                         Spacer()
-
-                        if coordinator.hasPassword {
-                            Button("取消") {
-                                resetPasswordDraft()
-                                showsPasswordEditor = false
-                            }
-                            .disabled(isSavingPassword)
-                        }
 
                         Button {
                             savePassword()
                         } label: {
                             HStack(spacing: 6) {
-                                if isSavingPassword {
+                                if draft.isSavingPassword {
                                     ProgressView()
-                                        .controlSize(.mini)
+                                        .controlSize(.small)
                                 }
                                 Text(coordinator.hasPassword ? "验证并更新" : "设置密码")
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(!canSavePassword)
                     }
-                }
-            }
 
-            if let feedbackText, coordinator.hasPassword, !showsPasswordEditor {
-                Label(
-                    feedbackText,
-                    systemImage: feedbackIsError
-                        ? "exclamationmark.circle.fill"
-                        : "checkmark.circle.fill"
-                )
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(feedbackIsError ? Color.red : Color.green)
-            }
-        }
-    }
-
-    private var authenticationCard: some View {
-        SettingsCard(
-            title: "生物识别",
-            subtitle: "呼出密码界面后，可自动请求一次 Touch ID。",
-            systemImage: "touchid"
-        ) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle(
-                        "允许使用 Touch ID 解锁",
-                        isOn: Binding(
-                            get: { coordinator.settings.touchIDEnabled },
-                            set: { coordinator.setTouchIDEnabled($0) }
-                        )
-                    )
-                    .font(.system(size: 13, weight: .medium))
-                    .disabled(
-                        !coordinator.hasPassword
-                            || (
-                                !coordinator.biometricAvailability.isAvailable
-                                    && !coordinator.settings.touchIDEnabled
-                            )
-                    )
-
-                    Text(coordinator.biometricAvailability.statusText)
-                        .font(.system(size: 10.5))
+                    Text("只能输入 0–9，共 6 位。")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-
-                    if !coordinator.hasPassword {
-                        Text("设置密码后才能启用 Touch ID 快捷解锁。")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.tertiary)
-                    }
                 }
+                .padding(.vertical, 4)
+            }
+        }
 
-                Spacer()
+        Section("Touch ID") {
+            Toggle("允许使用 Touch ID 解锁", isOn: touchIDBinding)
+                .disabled(
+                    !coordinator.hasPassword
+                        || (
+                            !coordinator.biometricAvailability.isAvailable
+                                && !coordinator.settings.touchIDEnabled
+                        )
+                )
 
-                Image(systemName: "touchid")
-                    .font(.system(size: 31, weight: .light))
-                    .foregroundStyle(Color.accentColor.opacity(0.72))
+            LabeledContent("可用状态", value: coordinator.biometricAvailability.statusText)
+
+            if !coordinator.hasPassword {
+                Text("设置密码后才能启用 Touch ID 快捷解锁。")
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
-    private var shortcutsCard: some View {
-        SettingsCard(
-            title: "全局快捷键",
-            subtitle: "录制时全局快捷键会暂时停用，按 Esc 可取消。",
-            systemImage: "keyboard"
-        ) {
-            VStack(spacing: 0) {
-                HotKeySettingRow(
-                    title: HotKeyTarget.lock.title,
-                    subtitle: "随时呼出 Liquid Glass 保护层",
-                    hotKey: coordinator.settings.lockHotKey,
-                    isRecording: recorder.target == .lock,
-                    hint: recorder.target == .lock
-                        ? "\(recorder.hint) · Esc 取消"
-                        : nil,
-                    action: {
-                        toggleRecording(for: .lock)
-                    }
-                )
+    @ViewBuilder
+    private var shortcutsContent: some View {
+        Section("呼出保护层") {
+            shortcutRow(
+                title: HotKeyTarget.lock.title,
+                subtitle: "在任何 App 中呼出透明保护层",
+                symbol: "lock.shield",
+                hotKey: coordinator.settings.lockHotKey,
+                target: .lock
+            )
+        }
 
-                Divider()
-                    .padding(.vertical, 11)
+        Section("紧急退出") {
+            shortcutRow(
+                title: HotKeyTarget.forceQuit.title,
+                subtitle: "保护层内唯一允许的退出方式",
+                symbol: "power",
+                hotKey: coordinator.settings.forceQuitHotKey,
+                target: .forceQuit
+            )
 
-                HotKeySettingRow(
-                    title: HotKeyTarget.forceQuit.title,
-                    subtitle: "保护层内唯一允许的退出方式",
-                    hotKey: coordinator.settings.forceQuitHotKey,
-                    isRecording: recorder.target == .forceQuit,
-                    hint: recorder.target == .forceQuit
-                        ? "\(recorder.hint) · Esc 取消"
-                        : nil,
-                    action: {
-                        toggleRecording(for: .forceQuit)
-                    }
-                )
-            }
+            Text("录制时全局快捷键会暂时停用，按 Esc 可取消。组合键至少需要 ⌘、⌥ 或 ⌃ 中的任意一个修饰键。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
 
+        Section {
             if let message = displayedHotKeyError {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 12)
-            } else if let hotKeyFeedback {
+            } else if let hotKeyFeedback = draft.hotKeyFeedback {
                 Label(hotKeyFeedback, systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.green)
-                    .padding(.top, 12)
             }
 
-            HStack {
-                Text("快捷键至少需要 ⌘、⌥ 或 ⌃ 中的任意一个修饰键。")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                Button("恢复默认") {
-                    recorder.cancel()
-                    hotKeyFeedback = nil
-                    coordinator.resetHotKeys()
-                    if coordinator.hotKeyRegistrationError == nil {
-                        hotKeyFeedback = "已恢复默认快捷键"
-                    }
+            Button("恢复默认快捷键") {
+                recorder.cancel()
+                draft.hotKeyFeedback = nil
+                draft.hotKeyRegistrationMessage = nil
+                coordinator.resetHotKeys()
+                if coordinator.hotKeyRegistrationError == nil {
+                    draft.hotKeyFeedback = "已恢复默认快捷键"
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.accentColor)
             }
-            .padding(.top, 12)
+            .buttonStyle(.glass)
         }
     }
 
-    private var startupCard: some View {
-        SettingsCard(
-            title: "启动与后台",
-            subtitle: "应用只在菜单栏出现，不会占用 Dock 或打开主窗口。",
-            systemImage: "menubar.rectangle"
-        ) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Toggle(
-                        "登录时自动启动 Sentinel",
-                        isOn: Binding(
-                            get: { coordinator.launchAtLoginEnabled },
-                            set: { coordinator.setLaunchAtLogin($0) }
-                        )
-                    )
-                    .font(.system(size: 13, weight: .medium))
-                    .disabled(coordinator.launchAtLoginRequiresApproval)
+    @ViewBuilder
+    private var aboutContent: some View {
+        Section {
+            HStack(spacing: 14) {
+                appMark
 
-                    Text(startupStatusText)
-                        .font(.system(size: 10.5))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sentinel")
+                        .font(.title3.weight(.semibold))
+
+                    Text("版本 v\(appVersion)")
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                if coordinator.launchAtLoginRequiresApproval {
-                    Button("打开登录项设置") {
-                        coordinator.openLoginItemsSettings()
-                    }
-                    .buttonStyle(.bordered)
+                Text("macOS 27")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+            }
+            .padding(.vertical, 5)
+        }
+
+        Section("作者") {
+            HStack(spacing: 14) {
+                profileAvatar
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Micropue")
+                        .font(.headline)
+
+                    Text("Sentinel 作者")
+                        .foregroundStyle(.secondary)
                 }
+
+                Spacer()
+            }
+            .padding(.vertical, 4)
+
+            LabeledContent("GitHub") {
+                Link(
+                    "github.com/Micropue",
+                    destination: URL(string: "https://github.com/Micropue")!
+                )
+            }
+
+            LabeledContent("官网") {
+                Link(
+                    "micropue.com.cn",
+                    destination: URL(string: "https://micropue.com.cn")!
+                )
             }
         }
-    }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        Section("保护方式") {
             Label(
-                "保护层不截图、不录制屏幕，背景画面由 macOS 合成器实时渲染。",
-                systemImage: "eye.slash"
+                "保护层不截图、不录制屏幕，背景由 macOS 合成器实时渲染。",
+                systemImage: "rectangle.inset.filled"
+            )
+            Label(
+                "所有显示器均由保护层覆盖，密码圆点只显示在主显示器。",
+                systemImage: "display.2"
             )
             Label(
                 "保护中请使用 \(coordinator.settings.forceQuitHotKey.displayString) 紧急退出。",
                 systemImage: "power"
             )
+        }
+
+        Section("当前快捷键") {
+            LabeledContent("呼出保护层") {
+                Text(coordinator.settings.lockHotKey.displayString)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("紧急退出") {
+                Text(coordinator.settings.forceQuitHotKey.displayString)
+                    .monospacedDigit()
+            }
+        }
+
+        Section("安全边界") {
             Text("Sentinel 不能防御 root、管理员、内核级程序、重启、恢复模式或物理断电。")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("它用于防止非电脑拥有者在 AI 任务运行时误操作，不等同于固件级或硬件级锁定。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 10.5))
-        .foregroundStyle(.tertiary)
-        .padding(.horizontal, 4)
-        .padding(.top, 2)
     }
 
-    private var protectionStatus: String {
-        if !coordinator.hasPassword {
-            return "等待设置"
+    private var appMark: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.accentColor.gradient)
+
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(Color.white)
         }
-        return coordinator.accessibilityTrusted ? "保护就绪" : "需要权限"
+        .frame(width: 46, height: 46)
+        .shadow(color: Color.black.opacity(0.1), radius: 4, y: 2)
     }
 
-    private var protectionColor: Color {
-        if !coordinator.hasPassword {
-            return .orange
+    private var profileAvatar: some View {
+        Group {
+            if let url = Bundle.main.url(
+                forResource: "MicropueAvatar",
+                withExtension: "png"
+            ),
+               let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .foregroundStyle(.secondary)
+            }
         }
-        return coordinator.accessibilityTrusted ? .green : .orange
+        .frame(width: 52, height: 52)
+        .clipShape(Circle())
+        .overlay {
+            Circle()
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        }
     }
 
-    private var startupStatusText: String {
-        if coordinator.launchAtLoginRequiresApproval {
-            return "macOS 正在等待你在“登录项与扩展”中确认。"
+    private func passwordInput(
+        title: String,
+        prompt: String,
+        text: Binding<String>,
+        field: PasswordField
+    ) -> some View {
+        LabeledContent(title) {
+            SecureField("", text: text, prompt: Text(prompt))
+                .textFieldStyle(.bordered)
+                .textInputBorderShape(.roundedRectangle)
+                .pointerStyle(.horizontalText)
+                .font(.body.monospacedDigit())
+                .focused($focusedPasswordField, equals: field)
+                .disabled(draft.isSavingPassword)
+                .frame(minWidth: 260, idealWidth: 320, maxWidth: 360)
+                .accessibilityLabel(Text(title))
         }
-        return coordinator.launchAtLoginEnabled
-            ? "下次登录 Mac 时会自动在菜单栏启动。"
-            : "目前仅在手动打开时运行。"
+    }
+
+    private func shortcutRow(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        hotKey: GlobalHotKey,
+        target: HotKeyTarget
+    ) -> some View {
+        LabeledContent {
+            Button {
+                toggleRecording(for: target)
+            } label: {
+                Label(
+                    recorder.target == target ? "取消录制" : hotKey.displayString,
+                    systemImage: recorder.target == target ? "escape" : "keyboard"
+                )
+                .monospacedDigit()
+                .frame(minWidth: 108)
+            }
+            .buttonStyle(.glass)
+            .tint(recorder.target == target ? Color.orange : Color.accentColor)
+        } label: {
+            SettingsIconLabel(
+                symbol: symbol,
+                title: title,
+                subtitle: recorder.target == target
+                    ? "\(recorder.hint) · Esc 取消"
+                    : subtitle,
+                tint: recorder.target == target ? .orange : .accentColor
+            )
+        }
+    }
+
+    private var feedbackLabel: some View {
+        Label(
+            draft.feedbackText ?? "",
+            systemImage: draft.feedbackIsError
+                ? "exclamationmark.circle.fill"
+                : "checkmark.circle.fill"
+        )
+        .foregroundStyle(draft.feedbackIsError ? Color.red : Color.green)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var currentPasswordBinding: Binding<String> {
+        Binding(
+            get: { draft.currentPassword },
+            set: { draft.currentPassword = sanitizePassword($0) }
+        )
+    }
+
+    private var newPasswordBinding: Binding<String> {
+        Binding(
+            get: { draft.newPassword },
+            set: { draft.newPassword = sanitizePassword($0) }
+        )
+    }
+
+    private var confirmationBinding: Binding<String> {
+        Binding(
+            get: { draft.confirmation },
+            set: { draft.confirmation = sanitizePassword($0) }
+        )
+    }
+
+    private var touchIDBinding: Binding<Bool> {
+        Binding(
+            get: { coordinator.settings.touchIDEnabled },
+            set: { coordinator.setTouchIDEnabled($0) }
+        )
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { coordinator.launchAtLoginEnabled },
+            set: { coordinator.setLaunchAtLogin($0) }
+        )
     }
 
     private var canSavePassword: Bool {
-        guard !isSavingPassword,
-              isSixDigits(newPassword),
-              newPassword == confirmation
+        guard !draft.isSavingPassword,
+              isSixDigits(draft.newPassword),
+              draft.newPassword == draft.confirmation
         else {
             return false
         }
-        return !coordinator.hasPassword || isSixDigits(currentPassword)
+        return !coordinator.hasPassword || isSixDigits(draft.currentPassword)
     }
 
     private var displayedHotKeyError: String? {
-        coordinator.hotKeyRegistrationError ?? hotKeyRegistrationMessage
+        coordinator.hotKeyRegistrationError ?? draft.hotKeyRegistrationMessage
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+            as? String ?? "1.0.0"
+    }
+
+    private func sanitizePassword(_ value: String) -> String {
+        String(value.filter { "0123456789".contains($0) }.prefix(6))
     }
 
     private func isSixDigits(_ value: String) -> Bool {
@@ -500,19 +628,19 @@ struct SettingsView: View {
         }
 
         clearPasswordFeedback()
-        isSavingPassword = true
-        let previousPassword = currentPassword
-        let replacement = newPassword
+        draft.isSavingPassword = true
+        let previousPassword = draft.currentPassword
+        let replacement = draft.newPassword
 
         Task { @MainActor in
             do {
                 if coordinator.hasPassword {
                     let isVerified = await coordinator.verifyPassword(previousPassword)
                     guard isVerified else {
-                        feedbackIsError = true
-                        feedbackText = "当前密码不正确。"
-                        currentPassword = ""
-                        isSavingPassword = false
+                        draft.feedbackIsError = true
+                        draft.feedbackText = "当前密码不正确。"
+                        draft.currentPassword = ""
+                        draft.isSavingPassword = false
                         return
                     }
                 }
@@ -523,27 +651,27 @@ struct SettingsView: View {
                 }
 
                 resetPasswordDraft()
-                showsPasswordEditor = false
-                feedbackIsError = false
-                feedbackText = "解锁密码已安全保存。"
-                isSavingPassword = false
+                draft.showsPasswordEditor = false
+                draft.feedbackIsError = false
+                draft.feedbackText = "解锁密码已安全保存。"
+                draft.isSavingPassword = false
             } catch {
-                feedbackIsError = true
-                feedbackText = error.localizedDescription
-                isSavingPassword = false
+                draft.feedbackIsError = true
+                draft.feedbackText = error.localizedDescription
+                draft.isSavingPassword = false
             }
         }
     }
 
     private func resetPasswordDraft() {
-        currentPassword = ""
-        newPassword = ""
-        confirmation = ""
+        draft.currentPassword = ""
+        draft.newPassword = ""
+        draft.confirmation = ""
     }
 
     private func clearPasswordFeedback() {
-        feedbackText = nil
-        feedbackIsError = false
+        draft.feedbackText = nil
+        draft.feedbackIsError = false
     }
 
     private func toggleRecording(for target: HotKeyTarget) {
@@ -552,8 +680,8 @@ struct SettingsView: View {
             return
         }
 
-        hotKeyFeedback = nil
-        hotKeyRegistrationMessage = nil
+        draft.hotKeyFeedback = nil
+        draft.hotKeyRegistrationMessage = nil
         recorder.start(
             target: target,
             onBegin: {
@@ -572,170 +700,44 @@ struct SettingsView: View {
         switch target {
         case .lock:
             guard hotKey != coordinator.settings.forceQuitHotKey else {
-                hotKeyRegistrationMessage = "呼出快捷键不能与强制关闭快捷键相同。"
+                draft.hotKeyRegistrationMessage = "呼出快捷键不能与强制关闭快捷键相同。"
                 return
             }
             coordinator.setLockHotKey(hotKey)
-            hotKeyFeedback = "呼出快捷键已更新为 \(hotKey.displayString)"
+            draft.hotKeyFeedback = "呼出快捷键已更新为 \(hotKey.displayString)"
 
         case .forceQuit:
             guard hotKey != coordinator.settings.lockHotKey else {
-                hotKeyRegistrationMessage = "强制关闭快捷键不能与呼出快捷键相同。"
+                draft.hotKeyRegistrationMessage = "强制关闭快捷键不能与呼出快捷键相同。"
                 return
             }
             coordinator.setForceQuitHotKey(hotKey)
-            hotKeyFeedback = "强制关闭快捷键已更新为 \(hotKey.displayString)"
+            draft.hotKeyFeedback = "强制关闭快捷键已更新为 \(hotKey.displayString)"
         }
     }
 }
 
-private struct SettingsCard<Content: View>: View {
+private struct SettingsIconLabel: View {
+    let symbol: String
     let title: String
     let subtitle: String
-    let systemImage: String
-    let content: Content
-
-    init(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.content = content()
-    }
+    let tint: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 28, height: 28)
-                    .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+        HStack(spacing: 11) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.12), in: Circle())
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold))
-                    Text(subtitle)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-            }
-
-            content
-        }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.80))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.075), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.035), radius: 16, y: 6)
-    }
-}
-
-private struct HotKeySettingRow: View {
-    let title: String
-    let subtitle: String
-    let hotKey: GlobalHotKey
-    let isRecording: Bool
-    let hint: String?
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 12.5, weight: .medium))
-                Text(hint ?? subtitle)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(isRecording ? Color.orange : Color.secondary)
-                    .contentTransition(.opacity)
-            }
 
-            Spacer()
-
-            Button(action: action) {
-                HStack(spacing: 7) {
-                    Image(systemName: isRecording ? "escape" : "keyboard")
-                    Text(isRecording ? "取消录制" : hotKey.displayString)
-                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                }
-                .frame(minWidth: 104)
-            }
-            .buttonStyle(.bordered)
-            .tint(isRecording ? .orange : .accentColor)
-        }
-    }
-}
-
-private struct CodeSecureField: View {
-    let title: String
-    @Binding var text: String
-    let isDisabled: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 10.5, weight: .medium))
+                Text(subtitle)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(text.count)/6")
-                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tertiary)
             }
-
-            SecureField(title, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .disabled(isDisabled)
-                .onChange(of: text) { _, newValue in
-                    let filtered = String(newValue.filter { "0123456789".contains($0) }.prefix(6))
-                    if filtered != newValue {
-                        text = filtered
-                    }
-                }
         }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct SettingsCanvas: View {
-    var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
-
-            RadialGradient(
-                colors: [
-                    Color(red: 0.17, green: 0.48, blue: 0.86).opacity(0.12),
-                    .clear
-                ],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 520
-            )
-
-            RadialGradient(
-                colors: [
-                    Color(red: 0.47, green: 0.29, blue: 0.79).opacity(0.08),
-                    .clear
-                ],
-                center: .bottomTrailing,
-                startRadius: 0,
-                endRadius: 560
-            )
-        }
-        .ignoresSafeArea()
     }
 }
