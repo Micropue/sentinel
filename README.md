@@ -4,6 +4,15 @@ Sentinel 是一个只驻留在 macOS 菜单栏的原生输入保护工具。它�
 
 应用使用 Swift、SwiftUI、AppKit 与 macOS 27 SDK 构建，发布包原生支持 Apple Silicon（arm64）。
 
+<p>
+  <img alt="macOS 27 SDK" src="https://img.shields.io/badge/macOS_27-SDK-000000?style=flat-square&logo=apple&logoColor=white">
+  <img alt="Swift 6.4" src="https://img.shields.io/badge/Swift-6.4-F05138?style=flat-square&logo=swift&logoColor=white">
+  <img alt="SwiftUI" src="https://img.shields.io/badge/UI-SwiftUI-0A84FF?style=flat-square&logo=swift&logoColor=white">
+  <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple_Silicon-arm64-111111?style=flat-square&logo=apple&logoColor=white">
+  <img alt="Menu bar app" src="https://img.shields.io/badge/LSUIElement-menu_bar-5E5CE6?style=flat-square">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-blue?style=flat-square"></a>
+</p>
+
 ## 功能
 
 - 菜单栏常驻，不在 Dock 显示，不创建启动主窗口
@@ -79,7 +88,7 @@ swift build -c release --arch arm64
 
 ```bash
 chmod +x Scripts/package.sh
-SENTINEL_VERSION=1.1.0 BUILD_NUMBER=1 Scripts/package.sh
+SENTINEL_VERSION=1.1.1 BUILD_NUMBER=1 Scripts/package.sh
 ```
 
 打包脚本会：
@@ -97,11 +106,15 @@ SENTINEL_VERSION=1.1.0 BUILD_NUMBER=1 Scripts/package.sh
 `.github/workflows/release.yml` 监听以 `v` 开头的标签：
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.1.1
+git push origin v1.1.1
 ```
 
 工作流会在 `macos-latest` 上构建 arm64 应用，生成 ZIP 和 DMG，并附加到对应的 GitHub Release。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。Copyright (c) 2026 Micropue。
 
 ## 安全边界
 
