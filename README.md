@@ -110,7 +110,7 @@ git tag v1.1.1
 git push origin v1.1.1
 ```
 
-工作流会在 `macos-latest` 上构建 arm64 应用，生成 ZIP 和 DMG，并附加到对应的 GitHub Release。
+工作流会在 `xcode-27`（macOS 27 / arm64）运行器上构建应用，生成 ZIP 和 DMG，并附加到对应的 GitHub Release。
 
 ## 许可证
 
