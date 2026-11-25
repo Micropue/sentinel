@@ -1,7 +1,14 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import CoreGraphics
 import Foundation
+
+enum LockInputEvent: Equatable {
+    case activity
+    case digit(Character)
+    case delete
+}
 
 final class InputLockService {
     private let forceQuitHotKey: GlobalHotKey
@@ -11,7 +18,7 @@ final class InputLockService {
 
     private static let activitySignalInterval: TimeInterval = 0.05
 
-    var onInput: ((Character?) -> Void)?
+    var onEvent: ((LockInputEvent) -> Void)?
     var onForceQuit: (() -> Void)?
 
     init(forceQuitHotKey: GlobalHotKey) {
@@ -95,6 +102,8 @@ final class InputLockService {
                 : nil
             if let digit {
                 forwardDigit(digit)
+            } else if Self.isDeletionKey(event) {
+                forwardDelete()
             } else {
                 forwardActivity()
             }
@@ -112,18 +121,33 @@ final class InputLockService {
             return
         }
         lastActivitySignal = now
-        forwardInput(nil)
+        forwardEvent(.activity)
     }
 
     private func forwardDigit(_ digit: Character) {
         lastActivitySignal = ProcessInfo.processInfo.systemUptime
-        forwardInput(digit)
+        forwardEvent(.digit(digit))
     }
 
-    private func forwardInput(_ digit: Character?) {
+    private func forwardDelete() {
+        lastActivitySignal = ProcessInfo.processInfo.systemUptime
+        forwardEvent(.delete)
+    }
+
+    private func forwardEvent(_ event: LockInputEvent) {
         DispatchQueue.main.async { [weak self] in
-            self?.onInput?(digit)
+            self?.onEvent?(event)
         }
+    }
+
+    private static func isDeletionKey(_ event: CGEvent) -> Bool {
+        let disallowed: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl]
+        guard event.flags.intersection(disallowed).isEmpty else {
+            return false
+        }
+
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        return keyCode == Int64(kVK_Delete) || keyCode == Int64(kVK_ForwardDelete)
     }
 
     private static func createEventTap(

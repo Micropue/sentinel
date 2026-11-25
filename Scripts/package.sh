@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 APP_NAME="Sentinel"
-VERSION="${SENTINEL_VERSION:-1.1.2}"
+VERSION="${SENTINEL_VERSION:-1.1.3}"
 VERSION="${VERSION#v}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 ARCH="${SENTINEL_ARCH:-arm64}"

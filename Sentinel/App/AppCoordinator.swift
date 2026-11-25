@@ -111,9 +111,9 @@ final class AppCoordinator: ObservableObject {
         )
         let inputLock = InputLockService(forceQuitHotKey: settings.forceQuitHotKey)
 
-        inputLock.onInput = { [weak self] digit in
+        inputLock.onEvent = { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handleInput(digit)
+                self?.handleInput(event)
             }
         }
         inputLock.onForceQuit = { [weak self] in
@@ -289,7 +289,7 @@ final class AppCoordinator: ObservableObject {
         hotKeyManager.stop()
     }
 
-    private func handleInput(_ digit: Character?) {
+    private func handleInput(_ event: LockInputEvent) {
         guard isLocked,
               let model = lockViewModel,
               Date().timeIntervalSince(lockStartedAt) >= Self.inputGracePeriod
@@ -301,23 +301,28 @@ final class AppCoordinator: ObservableObject {
         model.registerUserActivity()
         scheduleIdleReturn()
 
-        if wasHidden && digit == nil {
+        if wasHidden && event == .activity {
             scheduleBiometricUnlock()
         }
 
-        if model.isBiometricPrompting && digit != nil {
+        if model.isBiometricPrompting && event != .activity {
             biometricPromptToken = UUID()
             biometric.cancel()
             model.cancelBiometricPrompt()
         }
 
-        guard let digit else {
+        switch event {
+        case .activity:
             return
-        }
 
-        let isComplete = model.appendDigit(digit)
-        if isComplete {
-            beginPasswordVerification()
+        case .delete:
+            model.removeLastDigit()
+
+        case .digit(let digit):
+            let isComplete = model.appendDigit(digit)
+            if isComplete {
+                beginPasswordVerification()
+            }
         }
     }
 

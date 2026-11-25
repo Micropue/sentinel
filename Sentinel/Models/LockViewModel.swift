@@ -41,6 +41,18 @@ final class LockViewModel: ObservableObject {
         return enteredDigits.count == Self.passwordLength
     }
 
+    func removeLastDigit() {
+        guard showsPasswordEntry,
+              !isVerifying,
+              !enteredDigits.isEmpty
+        else {
+            return
+        }
+
+        showsError = false
+        enteredDigits.removeLast()
+    }
+
     func beginVerification() {
         isVerifying = true
         showsError = false

@@ -88,7 +88,7 @@ swift build -c release --arch arm64
 
 ```bash
 chmod +x Scripts/package.sh
-SENTINEL_VERSION=1.1.2 BUILD_NUMBER=1 Scripts/package.sh
+SENTINEL_VERSION=1.1.3 BUILD_NUMBER=1 Scripts/package.sh
 ```
 
 打包脚本会：
@@ -106,8 +106,8 @@ SENTINEL_VERSION=1.1.2 BUILD_NUMBER=1 Scripts/package.sh
 `.github/workflows/release.yml` 监听以 `v` 开头的标签：
 
 ```bash
-git tag v1.1.2
-git push origin v1.1.2
+git tag v1.1.3
+git push origin v1.1.3
 ```
 
 工作流会在 `xcode-27`（macOS 27 / arm64）运行器上构建应用，生成 ZIP 和 DMG，并附加到对应的 GitHub Release。
