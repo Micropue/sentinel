@@ -41,6 +41,7 @@ private final class SettingsDraft: ObservableObject {
     @Published var newPassword = ""
     @Published var confirmation = ""
     @Published var isSavingPassword = false
+    @Published var isImportingLegacyPassword = false
     @Published var showsPasswordEditor = false
     @Published var feedbackText: String?
     @Published var feedbackIsError = false
@@ -219,7 +220,7 @@ struct SettingsView: View {
                     )
                 }
 
-                Text("密码以 PBKDF2-SHA256 加盐摘要形式保存在 macOS 钥匙串。")
+                Text("密码以加盐摘要形式保存在本机 Application Support，启动、锁定和解锁均不会访问钥匙串。")
                     .foregroundStyle(.secondary)
 
                 if draft.feedbackText != nil {
@@ -233,6 +234,36 @@ struct SettingsView: View {
                 .buttonStyle(.glass)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
+                    if !coordinator.hasPassword {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("从 1.1.3 或更早版本升级")
+                                .font(.headline)
+
+                            Text("旧版密码摘要保存在系统钥匙串。只有点击下方按钮时才会读取一次；日常启动、锁定和解锁不会访问钥匙串。")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button {
+                                importLegacyPassword()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if draft.isImportingLegacyPassword {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text("导入旧版钥匙串密码")
+                                }
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(
+                                draft.isImportingLegacyPassword
+                                    || draft.isSavingPassword
+                            )
+                        }
+                        .padding(.vertical, 4)
+                    }
+
                     if coordinator.hasPassword {
                         passwordInput(
                             title: "当前密码",
@@ -268,7 +299,10 @@ struct SettingsView: View {
                                 draft.showsPasswordEditor = false
                             }
                             .buttonStyle(.glass)
-                            .disabled(draft.isSavingPassword)
+                            .disabled(
+                                draft.isSavingPassword
+                                    || draft.isImportingLegacyPassword
+                            )
                         }
 
                         Spacer()
@@ -285,7 +319,10 @@ struct SettingsView: View {
                             }
                         }
                         .buttonStyle(.glassProminent)
-                        .disabled(!canSavePassword)
+                        .disabled(
+                            !canSavePassword
+                                || draft.isImportingLegacyPassword
+                        )
                     }
 
                     Text("只能输入 0–9，共 6 位。")
@@ -660,6 +697,29 @@ struct SettingsView: View {
                 draft.feedbackText = error.localizedDescription
                 draft.isSavingPassword = false
             }
+        }
+    }
+
+    private func importLegacyPassword() {
+        guard !draft.isImportingLegacyPassword else {
+            return
+        }
+
+        clearPasswordFeedback()
+        draft.isImportingLegacyPassword = true
+
+        Task { @MainActor in
+            do {
+                try await coordinator.importLegacyPasswordRecord()
+                focusedPasswordField = nil
+                draft.feedbackIsError = false
+                draft.feedbackText = "已导入旧版密码摘要，后续解锁不再读取钥匙串。"
+                draft.showsPasswordEditor = false
+            } catch {
+                draft.feedbackIsError = true
+                draft.feedbackText = error.localizedDescription
+            }
+            draft.isImportingLegacyPassword = false
         }
     }
 

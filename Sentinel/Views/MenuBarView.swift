@@ -12,14 +12,12 @@ struct MenuBarView: View {
         Divider()
 
         Button {
-            if coordinator.accessibilityTrusted {
-                coordinator.openAccessibilitySettings()
-            } else {
-                coordinator.requestAccessibilityPermission()
-            }
+            coordinator.openAccessibilitySettings()
         } label: {
             Label(
-                coordinator.accessibilityTrusted ? "辅助功能：已授权" : "辅助功能：需要授权",
+                coordinator.accessibilityTrusted
+                    ? "辅助功能：已授权"
+                    : "打开辅助功能设置",
                 systemImage: coordinator.accessibilityTrusted
                     ? "checkmark.shield"
                     : "exclamationmark.shield"

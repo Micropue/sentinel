@@ -2,16 +2,13 @@ import CryptoKit
 import Foundation
 import Security
 
-struct PasswordRecord: Codable, Sendable {
-    let version: Int
-    let salt: Data
-    let hash: Data
-    let iterations: Int
-}
-
 enum PasswordVaultError: LocalizedError {
     case invalidFormat
     case corruptRecord
+    case alreadyConfigured
+    case legacyPasswordUnavailable
+    case legacyImportInProgress
+    case locked
     case randomGenerationFailed(OSStatus)
 
     var errorDescription: String? {
@@ -20,6 +17,14 @@ enum PasswordVaultError: LocalizedError {
             return "解锁密码必须恰好为 6 位数字。"
         case .corruptRecord:
             return "保存的解锁凭据无法读取，请在设置中重新设置密码。"
+        case .alreadyConfigured:
+            return "当前已经设置了本机解锁密码。"
+        case .legacyPasswordUnavailable:
+            return "旧版钥匙串中没有可导入的解锁密码。"
+        case .legacyImportInProgress:
+            return "请先完成或取消当前的旧版密码读取操作。"
+        case .locked:
+            return "锁定期间不能修改解锁凭据。"
         case .randomGenerationFailed(let status):
             return "无法生成安全随机数（\(status)）。"
         }
@@ -32,12 +37,14 @@ struct PasswordVault: Sendable {
     private static let saltLength = 16
     private static let keyLength = 32
 
+    private let store: PasswordRecordStore
+
+    init(store: PasswordRecordStore = PasswordRecordStore()) {
+        self.store = store
+    }
+
     var hasPassword: Bool {
-        do {
-            return try KeychainStore.readPasswordData() != nil
-        } catch {
-            return false
-        }
+        (try? store.load()) != nil
     }
 
     static func validateFormat(_ password: String) throws {
@@ -69,8 +76,22 @@ struct PasswordVault: Sendable {
             hash: hash,
             iterations: Self.iterationCount
         )
-        let encoded = try JSONEncoder().encode(record)
-        try KeychainStore.savePasswordData(encoded)
+        try store.save(record)
+    }
+
+    @discardableResult
+    func importLegacyPasswordRecord() throws -> Bool {
+        if (try? store.load()) != nil {
+            throw PasswordVaultError.alreadyConfigured
+        }
+
+        guard let data = try LegacyKeychainStore.readPasswordData() else {
+            return false
+        }
+
+        let record = try Self.decodeRecord(data)
+        try store.save(record)
+        return true
     }
 
     func verify(_ password: String) async -> Bool {
@@ -93,13 +114,25 @@ struct PasswordVault: Sendable {
     }
 
     private func recordForVerification() throws -> PasswordRecord {
-        guard let data = try KeychainStore.readPasswordData() else {
+        guard let record = try? store.load() else {
             throw PasswordVaultError.corruptRecord
         }
+        guard record.version == 1,
+              !record.salt.isEmpty,
+              record.hash.count == Self.keyLength,
+              record.iterations > 0,
+              record.iterations <= 1_000_000
+        else {
+            throw PasswordVaultError.corruptRecord
+        }
+        return record
+    }
+
+    private static func decodeRecord(_ data: Data) throws -> PasswordRecord {
         guard let record = try? JSONDecoder().decode(PasswordRecord.self, from: data),
               record.version == 1,
               !record.salt.isEmpty,
-              record.hash.count == Self.keyLength,
+              record.hash.count == keyLength,
               record.iterations > 0,
               record.iterations <= 1_000_000
         else {

@@ -14,6 +14,9 @@ jobs:
     env:
       SENTINEL_VERSION: ${{ github.ref_name }}
       BUILD_NUMBER: ${{ github.run_number }}
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -24,6 +27,41 @@ jobs:
           xcode-select -p
           xcrun --show-sdk-version
           swift --version
+
+      - name: Import stable code-signing certificate
+        if: ${{ env.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CERTIFICATE_PATH="$RUNNER_TEMP/sentinel-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/sentinel-signing.keychain-db"
+
+          echo -n "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$MACOS_KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH" >/dev/null
+
+          EXISTING_KEYCHAINS=($(security list-keychains -d user | tr -d '"'))
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
+
+          IDENTITY="$(
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+              | awk -F '"' '/"$/ { print $2; exit }'
+          )"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "The imported certificate has no valid code-signing identity." >&2
+            exit 1
+          fi
+          echo "SENTINEL_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Package arm64 app
         run: |

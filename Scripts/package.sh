@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 APP_NAME="Sentinel"
-VERSION="${SENTINEL_VERSION:-1.1.3}"
+VERSION="${SENTINEL_VERSION:-1.1.4}"
 VERSION="${VERSION#v}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 ARCH="${SENTINEL_ARCH:-arm64}"
@@ -70,8 +70,45 @@ python3 "$ROOT_DIR/Scripts/generate_icns.py" \
     "$CONTENTS_DIR/Resources/Sentinel.icns"
 
 xattr -cr "$APP_PATH"
-codesign --force --deep --sign - "$APP_PATH"
-codesign --verify --deep --strict "$APP_PATH"
+
+SIGNING_IDENTITY="${SENTINEL_SIGNING_IDENTITY:-}"
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+    SIGNING_IDENTITY="$(
+        security find-identity -v -p codesigning 2>/dev/null \
+            | awk -F '"' '/Developer ID Application/ { print $2; exit }'
+    )"
+fi
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+    SIGNING_IDENTITY="$(
+        security find-identity -v -p codesigning 2>/dev/null \
+            | awk -F '"' '/Apple Development/ { print $2; exit }'
+    )"
+fi
+
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+    SIGNING_IDENTITY="-"
+    echo "Warning: no stable code-signing identity found; using ad-hoc signing."
+    echo "Accessibility permission may need to be granted again after an app update." >&2
+    codesign \
+        --force \
+        --identifier "com.micropue.sentinel" \
+        --sign - \
+        "$APP_PATH"
+else
+    echo "Code signing identity: $SIGNING_IDENTITY"
+    SIGN_ARGS=(
+        --force
+        --options runtime
+        --identifier "com.micropue.sentinel"
+        --sign "$SIGNING_IDENTITY"
+    )
+    if [[ "${SENTINEL_TIMESTAMP:-1}" != "0" ]]; then
+        SIGN_ARGS+=(--timestamp)
+    fi
+    codesign "${SIGN_ARGS[@]}" "$APP_PATH"
+fi
+
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 ZIP_PATH="$DIST_DIR/$APP_NAME-$VERSION-macos-$ARCH.zip"
 DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION-macos-$ARCH.dmg"

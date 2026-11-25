@@ -33,6 +33,7 @@ final class AppCoordinator: ObservableObject {
     private var lastInputDate = Date.distantPast
     private var lockStartedAt = Date.distantPast
     private var hotKeySuspensionDepth = 0
+    private var isLegacyPasswordImportInProgress = false
     private var didStart = false
 
     private static let inputGracePeriod: TimeInterval = 0.45
@@ -84,6 +85,15 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
+        guard !isLegacyPasswordImportInProgress else {
+            presentSettings()
+            presentAlert(
+                title: "正在读取旧版密码",
+                message: "请先完成或取消系统钥匙串窗口，再开启保护。"
+            )
+            return
+        }
+
         refreshPermissionsAndSettings()
 
         guard hasPassword else {
@@ -96,11 +106,10 @@ final class AppCoordinator: ObservableObject {
         }
 
         guard InputLockService.isAccessibilityTrusted else {
-            InputLockService.requestAccessibilityPermission()
             presentSettings()
             presentAlert(
                 title: "需要辅助功能权限",
-                message: "请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 Sentinel。未获得此权限时，Sentinel 不会显示保护层，以免形成可被键盘和鼠标绕过的假保护。"
+                message: "请在设置页点击“请求授权”，然后前往“系统设置 → 隐私与安全性 → 辅助功能”允许 Sentinel。Sentinel 不会在每次启动或锁定时自动再次请求权限。"
             )
             return
         }
@@ -152,13 +161,40 @@ final class AppCoordinator: ObservableObject {
 
     func setPassword(_ password: String) async throws {
         guard !isLocked else {
-            throw PasswordVaultError.invalidFormat
+            throw PasswordVaultError.locked
+        }
+        guard !isLegacyPasswordImportInProgress else {
+            throw PasswordVaultError.legacyImportInProgress
         }
 
         let vault = self.vault
         try await Task.detached(priority: .userInitiated) {
             try vault.setPassword(password)
         }.value
+        hasPassword = vault.hasPassword
+    }
+
+    func importLegacyPasswordRecord() async throws {
+        guard !isLocked else {
+            throw PasswordVaultError.locked
+        }
+        guard !isLegacyPasswordImportInProgress else {
+            throw PasswordVaultError.legacyImportInProgress
+        }
+
+        let vault = self.vault
+        isLegacyPasswordImportInProgress = true
+        defer {
+            isLegacyPasswordImportInProgress = false
+        }
+
+        let imported = try await Task.detached(priority: .userInitiated) {
+            try vault.importLegacyPasswordRecord()
+        }.value
+
+        guard imported else {
+            throw PasswordVaultError.legacyPasswordUnavailable
+        }
         hasPassword = vault.hasPassword
     }
 
@@ -201,6 +237,9 @@ final class AppCoordinator: ObservableObject {
     }
 
     func requestAccessibilityPermission() {
+        guard !isLocked else {
+            return
+        }
         InputLockService.requestAccessibilityPermission()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.refreshAccessibilityStatus()
@@ -208,6 +247,9 @@ final class AppCoordinator: ObservableObject {
     }
 
     func openAccessibilitySettings() {
+        guard !isLocked else {
+            return
+        }
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         ) else {
